@@ -1,0 +1,198 @@
+---
+title: "Machine Learning Course Project"
+author: "D. Gigirey"
+date: "Saturday, December 26, 2015"
+output: html_document
+---
+
+# Background
+
+    Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+
+
+# Data source
+
+
+The training data for this project are available here: 
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here: 
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment. 
+
+
+Load packages
+```{r}
+library(data.table)
+library(caret)
+library(rpart)
+library(partykit)
+library(e1071)
+library(randomForest)
+setInternet2(TRUE)
+
+```
+
+# Getting  the data
+
+```{r}
+urlTraining<-"http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+trainingData<-read.csv(urlTraining,na.strings=c("NA","N/A","","#DIV/0!"))
+
+urlTesting<-"http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+testingData<-read.csv(urlTesting,na.strings=c("NA","N/A","","#DIV/0!"))
+
+dim(trainingData)
+dim(testingData)
+```
+
+# Exploratory Data Anlysis
+```{r}
+# We take a look at the data
+str(trainingData, list.length=10)
+
+table(trainingData$classe)
+
+```
+
+# Cleaning the Data
+
+It's important to select the features used in the model
+```{r}
+# First let's remove columns that are not relevant
+# such as "_timestamp","_window"
+trainingData<-trainingData[,7:160]
+testingData<-testingData[,7:160]
+
+table(trainingData$classe)
+
+```
+
+Remove near zero covariates
+```{r}
+nsv <- nearZeroVar(trainingData, saveMetrics = TRUE)
+training <- trainingData[, !nsv$nzv]
+
+testing <- testingData[, !nsv$nzv]
+
+dim(training)
+dim(testing)
+```
+
+Remove variables with more than 80% missing values
+```{r}
+nav <- sapply(colnames(training), function(x) if(sum(is.na(training[, x])) > 0.8*nrow(training)){return(T)}else{return(F)})
+training <- training[, !nav]
+testing <- testing[,!nav]
+
+dim(training)
+dim(testing)
+
+```
+
+# Splitting the training set 
+
+We will split the training set into a pure training data set and a validation data set
+training set - 60% , test set 40 %
+```{r}
+# splitting the training set
+inTrain<-createDataPartition(training$classe,p=0.60,list=FALSE)
+trainData<-training[inTrain,]
+testData<-training[-inTrain,]
+```
+
+# Modeling
+
+First we are going to use a Decision Tree
+```{r}
+# Prediction with Decision Trees
+set.seed(1234)
+mFit1 <- rpart(classe ~ .,data=trainData, method="class",
+               control=rpart.control(maxdepth=15))
+# mFit1
+plot(as.party(mFit1))
+```
+
+We estimate the model performance using the test set
+```{r}
+# model performance using the testing set
+predictions<- predict(mFit1,testData,type="class")
+cm<-confusionMatrix(predictions,testData$classe)
+cm
+```
+
+Now we are going to use a Random Forest
+
+The advantages of Random Forest are :
+* acurate
+* easy to use
+* fast
+* robust
+
+## Random Forest
+```{r}
+controlRF<-trainControl(method="cv",5)
+rfFit <- train(classe ~ .,data=trainData,method="rf",trControl=controlRF,ntree=250)
+rfFit
+```
+
+We estimate the model performance using the testing set
+```{r}
+# estimate the model performance 
+predictions_rf<- predict(rfFit,testData)
+# length of the predictions
+length(predictions_rf)
+cmrf<-confusionMatrix(predictions_rf,testData$classe)
+cmrf
+```
+
+```{r}
+# plot the random forest model
+plot(rfFit, log = "y", lwd = 2, main = "Random forest accuracy",
+     xlab = "Predictors", 
+     ylab = "Accuracy")
+```
+Altough we reduced the number of predictors, it's possible to use less predictors to obtain high accuracy.
+
+## Expected Out-of-sample error
+```{r}
+# true accuracy of the predicted model
+outOfSampleError.accuracy <- sum(predictions_rf == testData$classe)/length(predictions_rf)
+
+outOfSampleError.accuracy
+
+# out of sample error and percentage of out of sample error
+outOfSampleError <- 1 - outOfSampleError.accuracy
+outOfSampleError
+```
+
+
+# Generating files to submit
+
+Due to its higher accuracy we are going to use Random Forest
+```{r}
+# We use the following formula 
+model_predictions <- predict(rfFit, testing)
+
+
+# We generate .TXT files with predictions to submit
+#answers<-testing$classe
+write_files = function (x) {
+  n = length(x)
+  for (i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+write_files(model_predictions)
+
+```
+
+# Conclusion
+
+With the Random Forest we obtained a high accuracy and a low out of sample error.
+It was possible to accurately predict the classification of 20 observations.
